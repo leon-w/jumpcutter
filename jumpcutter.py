@@ -1,5 +1,3 @@
-from contextlib import closing
-from PIL import Image
 import subprocess
 from audiotsm import phasevocoder
 from audiotsm.io.wav import WavReader, WavWriter
@@ -8,64 +6,67 @@ import numpy as np
 import re
 import math
 from shutil import copyfile, rmtree
-import os
+import os, sys
 import argparse
-from pytube import YouTube
+from datetime import datetime
 
-def downloadFile(url):
-    name = YouTube(url).streams.first().download()
-    newname = name.replace(' ','_')
-    os.rename(name,newname)
-    return newname
+
 
 def getMaxVolume(s):
     maxv = float(np.max(s))
     minv = float(np.min(s))
     return max(maxv,-minv)
 
-def copyFrame(inputFrame,outputFrame):
+def copyFrame(inputFrame, outputFrame):
     src = TEMP_FOLDER+"/frame{:06d}".format(inputFrame+1)+".jpg"
     dst = TEMP_FOLDER+"/newFrame{:06d}".format(outputFrame+1)+".jpg"
     if not os.path.isfile(src):
         return False
     copyfile(src, dst)
-    if outputFrame%20 == 19:
+    if outputFrame%100 == 99 and not args.silent:
         print(str(outputFrame+1)+" time-altered frames saved.")
     return True
 
-def inputToOutputFilename(filename):
+def appendToFileName(filename, extra):
     dotIndex = filename.rfind(".")
-    return filename[:dotIndex]+"_ALTERED"+filename[dotIndex:]
+    return filename[:dotIndex]+extra+filename[dotIndex:]
 
-def createPath(s):
-    #assert (not os.path.exists(s)), "The filepath "+s+" already exists. Don't want to overwrite it. Aborting."
+def createPath(path):
+    try:
+        os.mkdir(path)
+    except OSError:
+        print(f"The {path} folder may already exist. (Failed to create)")
 
-    try:  
-        os.mkdir(s)
-    except OSError:  
-        assert False, "Creation of the directory %s failed. (The TEMP folder may already exist. Delete or rename it, and try again.)"
+def deletePath(path): # Dangerous! Watch out!
+    try:
+        rmtree(path, ignore_errors=False)
+    except OSError:
+        print(f"Failed to delete directory {path}")
 
-def deletePath(s): # Dangerous! Watch out!
-    try:  
-        rmtree(s,ignore_errors=False)
-    except OSError:  
-        print ("Deletion of the directory %s failed" % s)
-        print(OSError)
+def log(msg):
+    if args.silent:
+        print(msg)
+    else:
+        bar = "#" * 120
+        print(bar)
+        print("#", msg)
+        print(bar)
+
+start_time = datetime.now()
 
 parser = argparse.ArgumentParser(description='Modifies a video file to play at different speeds when there is sound vs. silence.')
-parser.add_argument('--input_file', type=str,  help='the video file you want modified')
-parser.add_argument('--url', type=str, help='A youtube url to download and process')
-parser.add_argument('--output_file', type=str, default="", help="the output file. (optional. if not included, it'll just modify the input file name)")
+parser.add_argument('-i', '--input_file', type=str,  help='the video file you want modified')
+parser.add_argument('-o', '--output_file', type=str, default="", help="the output file. (optional. if not included, it'll just modify the input file name)")
 parser.add_argument('--silent_threshold', type=float, default=0.03, help="the volume amount that frames' audio needs to surpass to be consider \"sounded\". It ranges from 0 (silence) to 1 (max volume)")
 parser.add_argument('--sounded_speed', type=float, default=1.00, help="the speed that sounded (spoken) frames should be played at. Typically 1.")
-parser.add_argument('--silent_speed', type=float, default=5.00, help="the speed that silent frames should be played at. 999999 for jumpcutting.")
-parser.add_argument('--frame_margin', type=float, default=1, help="some silent frames adjacent to sounded frames are included to provide context. How many frames on either the side of speech should be included? That's this variable.")
+parser.add_argument('--silent_speed', type=float, default=10.00, help="the speed that silent frames should be played at. 999999 for jumpcutting.")
+parser.add_argument('--frame_margin', type=float, default=3, help="some silent frames adjacent to sounded frames are included to provide context. How many frames on either the side of speech should be included? That's this variable.")
 parser.add_argument('--sample_rate', type=float, default=44100, help="sample rate of the input and output videos")
 parser.add_argument('--frame_rate', type=float, default=30, help="frame rate of the input and output videos. optional... I try to find it out myself, but it doesn't always work.")
-parser.add_argument('--frame_quality', type=int, default=3, help="quality of frames to be extracted from input video. 1 is highest, 31 is lowest, 3 is the default.")
+parser.add_argument('--frame_quality', type=int, default=2, help="quality of frames to be extracted from input video. 1 is highest, 31 is lowest, 3 is the default.")
+parser.add_argument('-s', '--silent', action='store_true', help="hide most output messages")
 
 args = parser.parse_args()
-
 
 
 frameRate = args.frame_rate
@@ -73,36 +74,32 @@ SAMPLE_RATE = args.sample_rate
 SILENT_THRESHOLD = args.silent_threshold
 FRAME_SPREADAGE = args.frame_margin
 NEW_SPEED = [args.silent_speed, args.sounded_speed]
-if args.url != None:
-    INPUT_FILE = downloadFile(args.url)
-else:
-    INPUT_FILE = args.input_file
-URL = args.url
+
+INPUT_FILE = args.input_file
 FRAME_QUALITY = args.frame_quality
 
-assert INPUT_FILE != None , "why u put no input file, that dum"
-    
-if len(args.output_file) >= 1:
-    OUTPUT_FILE = args.output_file
-else:
-    OUTPUT_FILE = inputToOutputFilename(INPUT_FILE)
+if not bool(INPUT_FILE) or not os.path.isfile(INPUT_FILE):
+    print(f"Input file '{INPUT_FILE}' not found.")
+    sys.exit(1)
 
 TEMP_FOLDER = "TEMP"
 AUDIO_FADE_ENVELOPE_SIZE = 400 # smooth out transitiion's audio by quickly fading in/out (arbitrary magic number whatever)
-    
+
 createPath(TEMP_FOLDER)
 
-command = "ffmpeg -i "+INPUT_FILE+" -qscale:v "+str(FRAME_QUALITY)+" "+TEMP_FOLDER+"/frame%06d.jpg -hide_banner"
+log("Extracting frames...")
+
+command = f"ffmpeg -hide_banner {'-loglevel panic'*args.silent} -i "+INPUT_FILE+" -qscale:v "+str(FRAME_QUALITY)+" "+TEMP_FOLDER+"/frame%06d.jpg"
 subprocess.call(command, shell=True)
 
-command = "ffmpeg -i "+INPUT_FILE+" -ab 160k -ac 2 -ar "+str(SAMPLE_RATE)+" -vn "+TEMP_FOLDER+"/audio.wav"
+log("Extracting audio...")
+command = f"ffmpeg -hide_banner {'-loglevel panic'*args.silent} -i "+INPUT_FILE+" -ab 160k -ac 2 -ar "+str(SAMPLE_RATE)+" -vn -y "+TEMP_FOLDER+"/audio.wav"
 
 subprocess.call(command, shell=True)
 
 command = "ffmpeg -i "+TEMP_FOLDER+"/input.mp4 2>&1"
 f = open(TEMP_FOLDER+"/params.txt", "w")
 subprocess.call(command, shell=True, stdout=f)
-
 
 
 sampleRate, audioData = wavfile.read(TEMP_FOLDER+"/audio.wav")
@@ -149,10 +146,14 @@ chunks = chunks[1:]
 outputAudioData = np.zeros((0,audioData.shape[1]))
 outputPointer = 0
 
+log("Selecting frames...")
+
+frames = 0
+
 lastExistingFrame = None
 for chunk in chunks:
     audioChunk = audioData[int(chunk[0]*samplesPerFrame):int(chunk[1]*samplesPerFrame)]
-    
+
     sFile = TEMP_FOLDER+"/tempStart.wav"
     eFile = TEMP_FOLDER+"/tempEnd.wav"
     wavfile.write(sFile,SAMPLE_RATE,audioChunk)
@@ -165,10 +166,8 @@ for chunk in chunks:
     endPointer = outputPointer+leng
     outputAudioData = np.concatenate((outputAudioData,alteredAudioData/maxAudioVolume))
 
-    #outputAudioData[outputPointer:endPointer] = alteredAudioData/maxAudioVolume
-
     # smooth out transitiion's audio by quickly fading in/out
-    
+
     if leng < AUDIO_FADE_ENVELOPE_SIZE:
         outputAudioData[outputPointer:endPointer] = 0 # audio is less than 0.01 sec, let's just remove it.
     else:
@@ -180,6 +179,7 @@ for chunk in chunks:
     startOutputFrame = int(math.ceil(outputPointer/samplesPerFrame))
     endOutputFrame = int(math.ceil(endPointer/samplesPerFrame))
     for outputFrame in range(startOutputFrame, endOutputFrame):
+        frames += 1
         inputFrame = int(chunk[0]+NEW_SPEED[int(chunk[2])]*(outputFrame-startOutputFrame))
         didItWork = copyFrame(inputFrame,outputFrame)
         if didItWork:
@@ -191,14 +191,18 @@ for chunk in chunks:
 
 wavfile.write(TEMP_FOLDER+"/audioNew.wav",SAMPLE_RATE,outputAudioData)
 
-'''
-outputFrame = math.ceil(outputPointer/samplesPerFrame)
-for endGap in range(outputFrame,audioFrameCount):
-    copyFrame(int(audioSampleCount/samplesPerFrame)-1,endGap)
-'''
+# ratio of frame reduction
+ratio = int((audioFrameCount / frames) * 100 - 100)
 
-command = "ffmpeg -framerate "+str(frameRate)+" -i "+TEMP_FOLDER+"/newFrame%06d.jpg -i "+TEMP_FOLDER+"/audioNew.wav -strict -2 "+OUTPUT_FILE
+if len(args.output_file) >= 1:
+    OUTPUT_FILE = args.output_file
+else:
+    OUTPUT_FILE = appendToFileName(INPUT_FILE, f"_JUMPCUT_{ratio}%_SHORTER")
+
+log("Rendering video...")
+command = f"ffmpeg -hide_banner {'-loglevel panic'*args.silent} -framerate "+str(frameRate)+" -i "+TEMP_FOLDER+"/newFrame%06d.jpg -i "+TEMP_FOLDER+"/audioNew.wav -strict -2 -y "+OUTPUT_FILE
 subprocess.call(command, shell=True)
 
-deletePath(TEMP_FOLDER)
+log(f"Done. Speedup: {ratio}% ({audioFrameCount} -> {frames}). Saved to {OUTPUT_FILE}. Time: {datetime.now() - start_time}")
 
+deletePath(TEMP_FOLDER)
