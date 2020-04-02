@@ -37,7 +37,7 @@ def createPath(path):
     except OSError:
         print(f"The {path} folder may already exist. (Failed to create)")
 
-def deletePath(path): # Dangerous! Watch out!
+def deletePath(path):
     try:
         rmtree(path, ignore_errors=False)
     except OSError:
