@@ -93,3 +93,7 @@ ENV/
 *.iml
 out
 gen
+
+# files to test the script in the current directory
+ffmpeg.exe
+*.mp4
