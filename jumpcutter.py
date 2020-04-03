@@ -10,8 +10,6 @@ import os, sys
 import argparse
 from datetime import datetime
 
-
-
 def getMaxVolume(s):
     maxv = float(np.max(s))
     minv = float(np.min(s))
@@ -31,19 +29,13 @@ def appendToFileName(filename, extra):
     dotIndex = filename.rfind(".")
     return filename[:dotIndex]+extra+filename[dotIndex:]
 
-def createPath(path):
-    try:
-        os.mkdir(path)
-    except OSError:
-        print(f"The {path} folder may already exist. (Failed to create)")
 
-def deletePath(path):
-    try:
-        rmtree(path, ignore_errors=False)
-    except OSError:
-        print(f"Failed to delete directory {path}")
+def error(msg, fatal=True):
+    print("[ERROR]", msg)
+    if fatal:
+        sys.exit(1)
 
-def log(msg):
+def log(msg, box=False):
     if args.silent:
         print(msg)
     else:
@@ -52,10 +44,11 @@ def log(msg):
         print("#", msg)
         print(bar)
 
+
 start_time = datetime.now()
 
 parser = argparse.ArgumentParser(description='Modifies a video file to play at different speeds when there is sound vs. silence.')
-parser.add_argument('-i', '--input_file', type=str,  help='the video file you want modified')
+parser.add_argument('input_file', type=str,  help='the video file you want modified')
 parser.add_argument('-o', '--output_file', type=str, default="", help="the output file. (optional. if not included, it'll just modify the input file name)")
 parser.add_argument('--silent_threshold', type=float, default=0.03, help="the volume amount that frames' audio needs to surpass to be consider \"sounded\". It ranges from 0 (silence) to 1 (max volume)")
 parser.add_argument('--sounded_speed', type=float, default=1.00, help="the speed that sounded (spoken) frames should be played at. Typically 1.")
@@ -69,7 +62,7 @@ parser.add_argument('-s', '--silent', action='store_true', help="hide most outpu
 args = parser.parse_args()
 
 
-frameRate = args.frame_rate
+FRAME_RATE = args.frame_rate
 SAMPLE_RATE = args.sample_rate
 SILENT_THRESHOLD = args.silent_threshold
 FRAME_SPREADAGE = args.frame_margin
@@ -77,45 +70,51 @@ NEW_SPEED = [args.silent_speed, args.sounded_speed]
 
 INPUT_FILE = args.input_file
 FRAME_QUALITY = args.frame_quality
-
-if not bool(INPUT_FILE) or not os.path.isfile(INPUT_FILE):
-    print(f"Input file '{INPUT_FILE}' not found.")
-    sys.exit(1)
+SILENT = args.silent
 
 TEMP_FOLDER = "TEMP"
 AUDIO_FADE_ENVELOPE_SIZE = 400 # smooth out transitiion's audio by quickly fading in/out (arbitrary magic number whatever)
 
-createPath(TEMP_FOLDER)
 
+# check input file
+if not os.path.isfile(INPUT_FILE):
+    error(f"Input file `{INPUT_FILE}` not found.")
+
+# create TMP directory
+try:
+    os.mkdir(TEMP_FOLDER)
+except OSError:
+    if not os.path.isdir(TEMP_FOLDER):
+        error(f"Failed to create temporary directory (`{TEMP_FOLDER}`)")
+
+# detect framerate
+p = subprocess.run(["ffmpeg", "-hide_banner" ,"-i", INPUT_FILE], capture_output=True, encoding="ascii")
+for line in p.stderr.split("\n"):
+    match = re.search('Stream #.*Video.* ([0-9]*) fps', line)
+    if match:
+        FRAME_RATE = float(match.group(1))
+        break
+
+# extract frames
 log("Extracting frames...")
+p = subprocess.run(["ffmpeg", "-hide_banner", "-i", INPUT_FILE, "-qscale:v", str(FRAME_QUALITY), TEMP_FOLDER + "/frame%06d.jpg"])
+if p.returncode:
+    error(f"ffmpeg terminated with code {p.returncode}.")
 
-command = f"ffmpeg -hide_banner {'-loglevel panic'*args.silent} -i "+INPUT_FILE+" -qscale:v "+str(FRAME_QUALITY)+" "+TEMP_FOLDER+"/frame%06d.jpg"
-subprocess.call(command, shell=True)
-
+# extract audio
 log("Extracting audio...")
-command = f"ffmpeg -hide_banner {'-loglevel panic'*args.silent} -i "+INPUT_FILE+" -ab 160k -ac 2 -ar "+str(SAMPLE_RATE)+" -vn -y "+TEMP_FOLDER+"/audio.wav"
+p = subprocess.run(["ffmpeg", "-hide_banner", "-i", INPUT_FILE, "-ab", "160k", "-ac", "2", "-ar", str(SAMPLE_RATE), "-vn", "-y", TEMP_FOLDER + "/audio.wav"])
+if p.returncode:
+    error(f"ffmpeg terminated with code {p.returncode}.")
 
-subprocess.call(command, shell=True)
+# TODO refactor
 
-command = "ffmpeg -i "+TEMP_FOLDER+"/input.mp4 2>&1"
-f = open(TEMP_FOLDER+"/params.txt", "w")
-subprocess.call(command, shell=True, stdout=f)
-
-
-sampleRate, audioData = wavfile.read(TEMP_FOLDER+"/audio.wav")
+sampleRate, audioData = wavfile.read(TEMP_FOLDER + "/audio.wav")
 audioSampleCount = audioData.shape[0]
 maxAudioVolume = getMaxVolume(audioData)
 
-f = open(TEMP_FOLDER+"/params.txt", 'r+')
-pre_params = f.read()
-f.close()
-params = pre_params.split('\n')
-for line in params:
-    m = re.search('Stream #.*Video.* ([0-9]*) fps',line)
-    if m is not None:
-        frameRate = float(m.group(1))
 
-samplesPerFrame = sampleRate/frameRate
+samplesPerFrame = sampleRate/FRAME_RATE
 
 audioFrameCount = int(math.ceil(audioSampleCount/samplesPerFrame))
 
@@ -199,10 +198,16 @@ if len(args.output_file) >= 1:
 else:
     OUTPUT_FILE = appendToFileName(INPUT_FILE, f"_JUMPCUT_{ratio}%_SHORTER")
 
+# render new video
 log("Rendering video...")
-command = f"ffmpeg -hide_banner {'-loglevel panic'*args.silent} -framerate "+str(frameRate)+" -i "+TEMP_FOLDER+"/newFrame%06d.jpg -i "+TEMP_FOLDER+"/audioNew.wav -strict -2 -y "+OUTPUT_FILE
-subprocess.call(command, shell=True)
+p = subprocess.run(["ffmpeg",  "-hide_banner", "-framerate", str(FRAME_RATE), "-i", TEMP_FOLDER + "/newFrame%06d.jpg", "-i", TEMP_FOLDER + "/audioNew.wav", "-strict", "-2", "-y", OUTPUT_FILE])
+if p.returncode:
+    error(f"ffmpeg terminated with code {p.returncode}.")
 
 log(f"Done. Speedup: {ratio}% ({audioFrameCount} -> {frames}). Saved to {OUTPUT_FILE}. Time: {datetime.now() - start_time}")
 
-deletePath(TEMP_FOLDER)
+# cleanup, delete temp dir
+try:
+    rmtree(TEMP_FOLDER, ignore_errors=False)
+except OSError:
+    error(f"Failed to delete directory {TEMP_FOLDER}", fatal=False)
