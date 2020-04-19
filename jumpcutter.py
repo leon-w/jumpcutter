@@ -67,6 +67,7 @@ parser.add_argument('--sample_rate', type=float, default=44100, help="sample rat
 parser.add_argument('--frame_rate', type=float, default=30, help="frame rate of the input and output videos. optional... I try to find it out myself, but it doesn't always work.")
 parser.add_argument('--frame_quality', type=int, default=2, help="quality of frames to be extracted from input video. 1 is highest, 31 is lowest, 3 is the default.")
 parser.add_argument('-s', '--silent', action='store_true', help="hide most output messages")
+parser.add_argument('--ffmpeg_path', type=str, default="ffmpeg", help="the path to the ffmpeg binary")
 
 args = parser.parse_args()
 
@@ -80,6 +81,7 @@ NEW_SPEED = [args.silent_speed, args.sounded_speed]
 INPUT_FILE = args.input_file
 FRAME_QUALITY = args.frame_quality
 SILENT = args.silent
+FFMPEG_PATH = args.ffmpeg_path
 
 TEMP_FOLDER = "TEMP"
 AUDIO_FADE_ENVELOPE_SIZE = 400 # smooth out transitiion's audio by quickly fading in/out (arbitrary magic number whatever)
@@ -97,7 +99,7 @@ except OSError:
         error(f"Failed to create temporary directory (`{TEMP_FOLDER}`)")
 
 # detect framerate
-p = subprocess.run(["ffmpeg", "-hide_banner" ,"-i", INPUT_FILE], capture_output=True, encoding="ascii")
+p = subprocess.run([FFMPEG_PATH, "-hide_banner" ,"-i", INPUT_FILE], capture_output=True, encoding="ascii")
 for line in p.stderr.split("\n"):
     match = re.search('Stream #.*Video.* ([0-9]*) fps', line)
     if match:
@@ -106,13 +108,13 @@ for line in p.stderr.split("\n"):
 
 # extract frames
 log("Extracting frames...")
-p = subprocess.run(["ffmpeg", "-hide_banner", "-i", INPUT_FILE, "-qscale:v", str(FRAME_QUALITY), TEMP_FOLDER + "/frame%06d.jpg"])
+p = subprocess.run([FFMPEG_PATH, "-hide_banner", "-i", INPUT_FILE, "-qscale:v", str(FRAME_QUALITY), TEMP_FOLDER + "/frame%06d.jpg"])
 if p.returncode:
     error(f"ffmpeg terminated with code {p.returncode}.")
 
 # extract audio
 log("Extracting audio...")
-p = subprocess.run(["ffmpeg", "-hide_banner", "-i", INPUT_FILE, "-ab", "160k", "-ac", "2", "-ar", str(SAMPLE_RATE), "-vn", "-y", TEMP_FOLDER + "/audio.wav"])
+p = subprocess.run([FFMPEG_PATH, "-hide_banner", "-i", INPUT_FILE, "-ab", "160k", "-ac", "2", "-ar", str(SAMPLE_RATE), "-vn", "-y", TEMP_FOLDER + "/audio.wav"])
 if p.returncode:
     error(f"ffmpeg terminated with code {p.returncode}.")
 
@@ -207,11 +209,11 @@ ratio = int((audioFrameCount / frames) * 100 - 100)
 if len(args.output_file) >= 1:
     OUTPUT_FILE = args.output_file
 else:
-    OUTPUT_FILE = appendToFileName(INPUT_FILE, f"_JUMPCUT_{ratio}%_SHORTER")
+    OUTPUT_FILE = appendToFileName(INPUT_FILE, f" - jumpcut {ratio}% faster")
 
 # render new video
 log("Rendering video...")
-p = subprocess.run(["ffmpeg",  "-hide_banner", "-framerate", str(FRAME_RATE), "-i", TEMP_FOLDER + "/newFrame%06d.jpg", "-i", TEMP_FOLDER + "/audioNew.wav", "-strict", "-2", "-y", OUTPUT_FILE])
+p = subprocess.run([FFMPEG_PATH,  "-hide_banner", "-framerate", str(FRAME_RATE), "-i", TEMP_FOLDER + "/newFrame%06d.jpg", "-i", TEMP_FOLDER + "/audioNew.wav", "-strict", "-2", "-y", OUTPUT_FILE])
 if p.returncode:
     error(f"ffmpeg terminated with code {p.returncode}.")
 
