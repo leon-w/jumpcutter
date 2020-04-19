@@ -1,6 +1,7 @@
 # jumpcutter
 
 Shorten videos by removing silence. Explanation here: https://www.youtube.com/watch?v=DQ8orIurGxw
+
 Tested on Windows 10 (should work on other systems).
 
 ## Prerequisites
