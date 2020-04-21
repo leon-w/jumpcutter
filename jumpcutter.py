@@ -10,6 +10,8 @@ import os, sys
 import argparse
 from datetime import datetime
 
+import ytdl
+
 def getMaxVolume(s):
     maxv = float(np.max(s))
     minv = float(np.min(s))
@@ -30,7 +32,7 @@ def copyFrame(inputFrame, outputFrame):
             return False
         copyfile(src, dst)
 
-    if outputFrame%100 == 99 and not args.silent:
+    if outputFrame%500 == 499 and not args.silent:
         print(f"{outputFrame+1} time-altered frames saved.")
     return True
 
@@ -57,7 +59,7 @@ def log(msg, box=False):
 start_time = datetime.now()
 
 parser = argparse.ArgumentParser(description='Modifies a video file to play at different speeds when there is sound vs. silence.')
-parser.add_argument('input_file', type=str,  help='the video file you want modified')
+parser.add_argument('input_file', type=str,  help='the video file you want modified or a youtube url')
 parser.add_argument('-o', '--output_file', type=str, default="", help="the output file. (optional. if not included, it'll just modify the input file name)")
 parser.add_argument('--silent_threshold', type=float, default=0.03, help="the volume amount that frames' audio needs to surpass to be consider \"sounded\". It ranges from 0 (silence) to 1 (max volume)")
 parser.add_argument('--sounded_speed', type=float, default=1.00, help="the speed that sounded (spoken) frames should be played at. Typically 1.")
@@ -86,6 +88,14 @@ FFMPEG_PATH = args.ffmpeg_path
 TEMP_FOLDER = "TEMP"
 AUDIO_FADE_ENVELOPE_SIZE = 400 # smooth out transitiion's audio by quickly fading in/out (arbitrary magic number whatever)
 
+# check if we need to download the video first
+if ytdl.is_youtube_url(INPUT_FILE):
+    log(f"Downloading {INPUT_FILE}")
+    cb = None if args.silent else lambda x: print(f"Downloaded {x}%")
+    try:
+        INPUT_FILE = ytdl.download_video(INPUT_FILE, progress_callback=cb)
+    except:
+        error(f"Failed to download `{INPUT_FILE}`.")
 
 # check input file
 if not os.path.isfile(INPUT_FILE):
@@ -101,7 +111,7 @@ except OSError:
 # detect framerate
 p = subprocess.run([FFMPEG_PATH, "-hide_banner" ,"-i", INPUT_FILE], capture_output=True, encoding="ascii")
 for line in p.stderr.split("\n"):
-    match = re.search('Stream #.*Video.* ([0-9]*) fps', line)
+    match = re.search('Stream #.*Video.* ([0-9\\.]*) fps', line)
     if match:
         FRAME_RATE = float(match.group(1))
         break
