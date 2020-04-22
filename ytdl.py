@@ -7,7 +7,7 @@ def sanatize_title(title, fallback="_"):
 def is_youtube_url(url):
     try:
         o = parse.urlparse(url)
-        return o.hostname in ["youtu.be", "youtube.com", "youtube.de"]
+        return o.hostname in ["www.youtu.be", "youtu.be", "youtube.com", "www.youtube.com", "www.youtube.de", "youtube.de"]
     except:
         return False
 

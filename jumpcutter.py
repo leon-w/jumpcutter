@@ -9,6 +9,7 @@ from shutil import copyfile, rmtree, move
 import os, sys
 import argparse
 from datetime import datetime
+import random
 
 import ytdl
 
@@ -85,8 +86,9 @@ FRAME_QUALITY = args.frame_quality
 SILENT = args.silent
 FFMPEG_PATH = args.ffmpeg_path
 
-TEMP_FOLDER = "TEMP"
+TEMP_FOLDER = f"TEMP_{random.randint(10**8, 10**9 - 1)}"
 AUDIO_FADE_ENVELOPE_SIZE = 400 # smooth out transitiion's audio by quickly fading in/out (arbitrary magic number whatever)
+
 
 # check if we need to download the video first
 if ytdl.is_youtube_url(INPUT_FILE):
