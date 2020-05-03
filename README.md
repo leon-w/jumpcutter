@@ -8,6 +8,9 @@ Tested on Windows 10 (should work on other systems).
 
 * `Python3`
 * `ffmpeg`
+* optional: [`ffmpeg-normalize`](https://github.com/slhck/ffmpeg-normalize)
+
+Run `pip3 install -r requirements.txt` to install required dependencies
 
 ## Usage
 ```

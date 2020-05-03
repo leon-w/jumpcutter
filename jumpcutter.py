@@ -71,6 +71,7 @@ parser.add_argument('--frame_rate', type=float, default=30, help="frame rate of 
 parser.add_argument('--frame_quality', type=int, default=2, help="quality of frames to be extracted from input video. 1 is highest, 31 is lowest, 3 is the default.")
 parser.add_argument('-s', '--silent', action='store_true', help="hide most output messages")
 parser.add_argument('--ffmpeg_path', type=str, default="ffmpeg", help="the path to the ffmpeg binary")
+parser.add_argument('--normalize_audio', action='store_true', help="normalize the audio of the output video (requires `ffmpeg-normalize`)")
 
 args = parser.parse_args()
 
@@ -85,6 +86,7 @@ INPUT_FILE = args.input_file
 FRAME_QUALITY = args.frame_quality
 SILENT = args.silent
 FFMPEG_PATH = args.ffmpeg_path
+NORMALIZE_AUDIO = args.normalize_audio
 
 TEMP_FOLDER = f"TEMP_{random.randint(10**8, 10**9 - 1)}"
 AUDIO_FADE_ENVELOPE_SIZE = 400 # smooth out transitiion's audio by quickly fading in/out (arbitrary magic number whatever)
@@ -228,6 +230,14 @@ log("Rendering video...")
 p = subprocess.run([FFMPEG_PATH,  "-hide_banner", "-framerate", str(FRAME_RATE), "-i", TEMP_FOLDER + "/newFrame%06d.jpg", "-i", TEMP_FOLDER + "/audioNew.wav", "-strict", "-2", "-y", OUTPUT_FILE])
 if p.returncode:
     error(f"ffmpeg terminated with code {p.returncode}.")
+
+if NORMALIZE_AUDIO:
+    log("Normalizing audio...")
+    OUTPUT_FILE_AUDIO_NORMALIZED = appendToFileName(OUTPUT_FILE, " - audio normalized")
+    p = subprocess.run(["ffmpeg-normalize", OUTPUT_FILE, "-c:a", "libmp3lame", "-o", OUTPUT_FILE_AUDIO_NORMALIZED, "-f"])
+    if p.returncode:
+        error(f"ffmpeg-normalize terminated with code {p.returncode}.", fatal=False)
+
 
 log(f"Done. Speedup: {ratio}% ({audioFrameCount} -> {frames}). Saved to {OUTPUT_FILE}. Time: {datetime.now() - start_time}")
 
