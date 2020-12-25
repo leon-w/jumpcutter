@@ -99,3 +99,5 @@ ffmpeg.exe
 *.mp4
 TEMP/
 PYTHON/
+
+.DS_store
